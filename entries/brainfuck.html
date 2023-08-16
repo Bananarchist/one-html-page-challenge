@@ -1,0 +1,312 @@
+<html>
+  <head>
+    <style>
+			body {
+				padding: 1vw;	
+				margin: 0;
+			}
+			main > * {
+				margin: 0 0 1vw 0;
+				padding: 0;
+			}
+			main > *:last-child {
+				margin: 0;
+			}
+      #script,
+			#stack {
+        display: inline-flex;
+        gap: 1em;
+				max-width: 98vw;
+				overflow-x: auto;
+      }
+			#stack > div {
+        border: solid 1px;
+        font-size: 12vw;
+        width: 2em;
+        height: 2em;
+        flex-grow: 0;
+        flex-shrink: 0;
+        display: grid;
+        grid-template-rows: 1fr 6fr 1fr;
+        text-align: center;
+      }
+			#stack > div * {
+        margin: 0;
+        padding: 0;
+        line-height: 1;
+        height: 100%;
+      }
+			#stack > div p {
+        flex: 1 0 1em;
+        font-size: 2vw;
+        grid-row: 3 / 4;
+      }
+			#stack > div div:first-child {
+        flex: 1 0 auto;
+        grid-row: 2 / 3;
+      }
+			#script > div {
+        border: solid 1px;
+        width: 3em;
+        height: 3em;
+        flex-grow: 0;
+        flex-shrink: 0;
+				vertical-align: middle;
+				border-radius: 5px;
+				box-sizing: border-box;
+			}
+			#script > div p {
+				text-align: center;
+			}
+			#script > div.selected {
+				box-shadow: 0 0 5px green, inset 0 0 2px blue;
+			}
+      textarea {
+        height: 4em;
+        width: calc(100% - 2em);
+        position: sticky;
+        left: 0;
+				top: 0;
+				display: block;
+      }
+      em {
+        width: 10vw;
+        height: 10vw;
+        position: absolute;
+        left: calc(50% - 5vw);
+        top: calc(45% - 5vw);
+        text-align: center;
+        background: rgba(0, 0, 0, 0.4);
+        box-shadow: 0 0 10px black;
+        border: solid 1px rgba(100, 100, 200, 0.3);
+        padding: 3rem;
+        color: rgba(150, 255, 150, 0.8);
+      }
+      em h2 {
+        font-size: 5rem;
+        line-height: 1;
+        margin: 0;
+        font-style: normal;
+      }
+      em p {
+        color: white;
+      }
+    </style>
+    <script>
+			const stepMode = Symbol();
+			const debugMode = Symbol();
+			const paused = Symbol();
+			const input = Symbol();
+			const running = Symbol();
+
+			addSetting = (x) => if (!settingEnabled(x)) { window.settings.push(x) };
+			delSetting = (x) => del window.settings(
+			settingEnabled = (x) => window.settings.find(x) != -1;
+
+			window.settings = [];
+			window.onload = () => {
+				const stepmode = document.getElementById("stepmode");
+				stepmode.addEventListener("change", (e) => {
+					console.log("stepmode: ", e);
+					if (stepmode.checked) {
+						addSetting(stepMode)
+					} else {
+						window.settings.stepmode = false;
+					}
+				});
+			};
+
+      function execute() {
+        runScript(stripComments([...document.querySelector("textarea").value]), newTape());
+      }
+      function newTape() {
+        let moreTape = () => {
+          (t = []).length = 10;
+          t.fill(0);
+          return t;
+        };
+        let tape = moreTape();
+        let ptr = 0;
+        return {
+          write(x) {
+            tape[ptr] = x;
+          },
+          read() {
+            return tape[ptr];
+          },
+          incr() {
+            tape[ptr] = tape[ptr] + 1;
+          },
+          decr() {
+            tape[ptr] = tape[ptr] - 1;
+          },
+          next() {
+            ptr = ptr + 1;
+            tape = ptr == tape.length ? tape.concat(moreTape()) : tape;
+          },
+          prev() {
+            ptr = ptr > 0 ? ptr - 1 : ptr;
+          },
+          forEach(f) {
+            tape.forEach((val, idx) => f(val, idx - ptr));
+          },
+          at() {
+            return ptr;
+          },
+        };
+      }
+
+      function keyDownEvent() {
+        return new Promise((resolve) => {
+          window.addEventListener("keydown", (e) => {
+            if (e.key.length == 1) {
+              resolve(e.key.charCodeAt());
+            }
+          });
+        });
+      }
+
+			function stripComments(script) {
+				return script.filter(c => c in cmap);
+			}
+
+      async function runScript(c, t, cp = 0) {
+        console.log(cp);
+				render_script(cp, c);
+				render_stack(t, "");
+				if(window.settings.stepmode) {
+					await pause();
+				}
+				forEachChar: for ( ; cp < c.length; cp++ ) {
+					let nc = c[cp];
+					render_script(cp, c);
+					await show_command(nc);
+          switch (nc) {
+            case "+":
+              t.incr();
+              break;
+            case "-":
+              t.decr();
+              break;
+            case ">":
+              t.next();
+              break;
+            case "<":
+              t.prev();
+              break;
+            case ".":
+              break;
+            case ",":
+              const k = await keyDownEvent();
+              t.write(k);
+              break;
+            case "[":
+								let newCp = cp;
+                while (t.read()) {
+                  newCp = await runScript(c, t, cp + 1);
+									render_script(cp, c);
+									render_stack(t, nc);
+									if(window.settings.stepmode) {
+										await pause();
+									}
+                }
+                cp = newCp + 1;
+            case "]":
+              return cp;
+            default:
+              console.log("Comment: ", nc);
+              continue forEachChar;
+          }
+					render_stack(t, nc);
+					if(!window.settings.stepmode) {
+						await pause();
+					}
+        }
+				render_script(cp, c);
+				render_stack(t, "");
+				return cp + 1;
+      }
+
+      const cmap = {
+        "+": "Increment Value",
+        "-": "Decrement Value",
+        ">": "Increment Register Pointer",
+        "<": "Decrement Register Point",
+        "[": "Conditional Jump",
+        "]": "Jump Back to Condition",
+        ",": "User Input",
+        ".": "Print",
+      };
+
+      function show_command(c, t) {
+				if(c in cmap && window.settings.stepmode) {
+					const b = document.body
+					const e = document.createElement("em");
+					const x = document.createElement("h2");
+					const y = document.createElement("p");
+					if (c != ",") {
+						x.textContent = c;
+					}
+					y.textContent = cmap[c];
+					e.append(x, y);
+					b.append(e);
+					return new Promise(resolve => {
+						setTimeout(() => {
+							try {
+								b.removeChild(e);
+							} catch (e) {}
+							resolve();
+						}, 500);
+					});
+				}
+      }
+
+      async function pause() {
+        return new Promise((resolve) => {
+          setTimeout(resolve, 500);
+        });
+      }
+
+			function render_script(ptr, s) {
+				const x = document.getElementById("script");
+				x.textContent = "";
+				s.forEach((c, d) => {
+					const cell = x.appendChild(document.createElement("div"));
+					if(ptr == d && window.settings.stepmode) {
+						cell.classList.add("selected");
+					}
+					const p = document.createElement("p");
+					p.textContent = c;
+					cell.appendChild(p);
+				});
+			}
+
+
+      function render_stack(t, c) {
+        const m = document.getElementById("stack");
+        m.textContent = "";
+        t.forEach((v, d) => {
+          const cell = m.appendChild(document.createElement("div"));
+          if (c == "," && d == 0) {
+            cell.appendChild(document.createElement("input"));
+          } else {
+            const r = document.createElement("div");
+            const p = document.createElement("p");
+            r.textContent = v;
+            p.textContent = String.fromCharCode(v);
+            cell.append(r, p);
+          }
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <main>
+			<textarea>+++</textarea>
+			<section id=controls>
+				<button onclick=execute()>Run</button>
+				<label>Step Mode: <input type=checkbox id=stepmode checked></label>
+			</section>
+			<section id=script></section>
+			<section id=stack></section>
+		</main>
