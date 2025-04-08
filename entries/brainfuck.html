@@ -91,6 +91,26 @@
       em p {
         color: white;
       }
+      ::backdrop {
+        background: rgba(0, 0, 0, 0.5);
+      }
+      dialog {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+      }
+      .modal-content input {
+        margin: 10px 0;
+        padding: 5px;
+        font-size: 16px;
+      }
+      .modal-content button {
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+      }
     </style>
     <script>
 			const stepMode = Symbol();
@@ -99,8 +119,14 @@
 			const input = Symbol();
 			const running = Symbol();
 
-			addSetting = (x) => if (!settingEnabled(x)) { window.settings.push(x) };
-			delSetting = (x) => del window.settings(
+			addSetting = (x) => {
+				if (!settingEnabled(x)) {
+					window.settings.push(x);
+				}
+			};
+			delSetting = (x) => {
+				window.settings.splice(window.settings.indexOf(x), 1);
+			};
 			settingEnabled = (x) => window.settings.find(x) != -1;
 
 			window.settings = [];
@@ -156,15 +182,42 @@
         };
       }
 
-      function keyDownEvent() {
-        return new Promise((resolve) => {
-          window.addEventListener("keydown", (e) => {
-            if (e.key.length == 1) {
-              resolve(e.key.charCodeAt());
-            }
+      // Add modal handling functions
+      function showInputModal() {
+          return new Promise((resolve) => {
+              let dialog = document.querySelector("dialog#inputModal");
+              let submit = dialog.querySelector("button[type=submit]");
+              dialog.showModal();
+              dialog.addEventListener("close", () => {
+                // If the dialog is closed by clicking the submit button, resolve the promise with the input value
+                if (dialog.returnValue === "submit") {
+                  const char = document.querySelector("#inputChar").value;
+                  const type = document.querySelector("input[name=inputType]:checked").value;
+                  dialog.querySelector("#inputChar").value = "";
+                  // If the input is a byte, parse it as an integer, otherwise convert the first character to a number
+                  resolve(type === "byte" ? parseInt(char, 10) : char.charCodeAt(0));
+                }
+              });
+              dialog.querySelector("#inputChar").focus();
+              // If the input type is a byte, set the input type to a number and the max length to 3
+              dialog.querySelectorAll("input[name=inputType]").forEach(e => {
+                e.onchange = (e) => {
+                  if (e.target.value === "byte") {
+                    document.getElementById("inputChar").type = "number";
+                  document.getElementById("inputChar").maxLength = 3;
+                } else {
+                    document.getElementById("inputChar").type = "text";
+                    document.getElementById("inputChar").maxLength = 1;
+                  }
+                }
+              });
           });
-        });
       }
+
+      function showOutputModal(char) {
+        document.getElementById("outputText").textContent = `ASCII: ${String.fromCharCode(char)} (Byte: ${char})`;
+        document.querySelector("dialog#outputModal").showModal();
+      } 
 
 			function stripComments(script) {
 				return script.filter(c => c in cmap);
@@ -174,13 +227,13 @@
         console.log(cp);
 				render_script(cp, c);
 				render_stack(t, "");
-				if(window.settings.stepmode) {
+				if(window.settings.includes(stepMode)) {
 					await pause();
 				}
 				forEachChar: for ( ; cp < c.length; cp++ ) {
 					let nc = c[cp];
 					render_script(cp, c);
-					await show_command(nc);
+					await show_command(nc, t);
           switch (nc) {
             case "+":
               t.incr();
@@ -195,9 +248,10 @@
               t.prev();
               break;
             case ".":
+              await showOutputModal(t.read());
               break;
             case ",":
-              const k = await keyDownEvent();
+              const k = await showInputModal();
               t.write(k);
               break;
             case "[":
@@ -206,7 +260,7 @@
                   newCp = await runScript(c, t, cp + 1);
 									render_script(cp, c);
 									render_stack(t, nc);
-									if(window.settings.stepmode) {
+									if(window.settings.includes(stepMode)) {
 										await pause();
 									}
                 }
@@ -218,7 +272,7 @@
               continue forEachChar;
           }
 					render_stack(t, nc);
-					if(!window.settings.stepmode) {
+					if(!window.settings.includes(stepMode)) {
 						await pause();
 					}
         }
@@ -239,14 +293,15 @@
       };
 
       function show_command(c, t) {
-				if(c in cmap && window.settings.stepmode) {
+				if(c in cmap && window.settings.includes(stepMode)) {
+					if (c === "," || c === ".") {
+						return Promise.resolve(); // Skip default command display for input/output
+					}
 					const b = document.body
 					const e = document.createElement("em");
 					const x = document.createElement("h2");
 					const y = document.createElement("p");
-					if (c != ",") {
-						x.textContent = c;
-					}
+					x.textContent = c;
 					y.textContent = cmap[c];
 					e.append(x, y);
 					b.append(e);
@@ -272,7 +327,7 @@
 				x.textContent = "";
 				s.forEach((c, d) => {
 					const cell = x.appendChild(document.createElement("div"));
-					if(ptr == d && window.settings.stepmode) {
+					if(ptr == d && window.settings.includes(stepMode)) {
 						cell.classList.add("selected");
 					}
 					const p = document.createElement("p");
@@ -287,15 +342,11 @@
         m.textContent = "";
         t.forEach((v, d) => {
           const cell = m.appendChild(document.createElement("div"));
-          if (c == "," && d == 0) {
-            cell.appendChild(document.createElement("input"));
-          } else {
-            const r = document.createElement("div");
-            const p = document.createElement("p");
-            r.textContent = v;
-            p.textContent = String.fromCharCode(v);
-            cell.append(r, p);
-          }
+          const r = document.createElement("div");
+          const p = document.createElement("p");
+          r.textContent = v;
+          p.textContent = String.fromCharCode(v);
+          cell.append(r, p);
         });
       }
     </script>
@@ -310,3 +361,24 @@
 			<section id=script></section>
 			<section id=stack></section>
 		</main>
+    <!-- Add modals for input and output -->
+    <dialog id="inputModal">
+      <h2>Input Required</h2>
+      <form method="dialog">
+        <label for=byte>Byte</label><input type=radio name=inputType id=byte value="byte" />
+        <label for=char>ASCII</label><input type=radio name=inputType id=char value="char" checked />
+        <br>
+        <input type="text" id="inputChar" maxlength="1" required autofocus>
+        <button value="cancel" formmethod="dialog" formnovalidate>Cancel</button>
+        <button type="submit" value="submit" formmethod="dialog">Submit</button>
+      </form>
+    </dialog>
+    <dialog id="outputModal">
+      <h2>Output</h2>
+      <p id="outputText"></p>
+      <form method="dialog">
+        <button value="ok" formmethod="dialog">OK</button>
+      </form>
+    </dialog>
+  </body>
+</html>
